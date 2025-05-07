@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Управление кофемашиной</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            grid-gap: 20px;
+            background-color: #f5f5f5;
+        }
+        .panel {
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            padding: 20px;
+            background-color: white;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        h2 {
+            margin-top: 0;
+            color: #333;
+            border-bottom: 1px solid #eee;
+            padding-bottom: 10px;
+        }
+        .status-display {
+            background-color: #fafafa;
+            border: 1px solid #eee;
+            padding: 15px;
+            min-height: 120px;
+            margin-bottom: 15px;
+            border-radius: 5px;
+            overflow-y: auto;
+        }
+        button {
+            padding: 10px 15px;
+            margin: 5px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            transition: all 0.3s;
+        }
+        button:hover:not(:disabled) {
+            opacity: 0.9;
+            transform: translateY(-1px);
+        }
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        .coffee-btn {
+            background-color: #6d4c41;
+            color: white;
+        }
+        .refill-btn {
+            background-color: #1976d2;
+            color: white;
+        }
+        .log-entry {
+            margin-bottom: 8px;
+            padding-bottom: 8px;
+            border-bottom: 1px solid #f0f0f0;
+            font-size: 0.9em;
+            line-height: 1.4;
+        }
+        .status-indicator {
+            display: inline-block;
+            width: 15px;
+            height: 15px;
+            border-radius: 50%;
+            margin-right: 8px;
+        }
+        .status-ready { background-color: #4caf50; }
+        .status-brewing { background-color: #ff9800; }
+        .status-error { background-color: #f44336; }
+        .status-disconnected { background-color: #9e9e9e; }
+        .critical {
+            color: #f44336;
+            font-weight: bold;
+            animation: blink 1s infinite;
+        }
+        .loading {
+            color: #9e9e9e;
+            font-style: italic;
+        }
+        #last-update {
+            font-size: 0.8em;
+            color: #757575;
+        }
+        @keyframes blink {
+            0% { opacity: 1; }
+            50% { opacity: 0.5; }
+            100% { opacity: 1; }
+        }
+        .brew-animation {
+            animation: pulse 1.5s infinite;
+        }
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.7; }
+            100% { opacity: 1; }
+        }
+    </style>
+</head>
+<body>
+    <div class="panel">
+        <h2>Состояние системы</h2>
+        <div class="status-display" id="status-panel">
+            <p>
+                <span class="status-indicator status-disconnected" id="status-icon"></span>
+                <strong>Статус:</strong> <span id="machine-status">Загрузка...</span>
+            </p>
+            <p><strong>Вода:</strong> <span id="water-level" class="loading">---</span> кружек</p>
+            <p><strong>Зёрна:</strong> <span id="beans-level" class="loading">---</span> единиц</p>
+            <p id="last-update">Обновлено: никогда</p>
+        </div>
+    </div>
+
+    <div class="panel">
+        <h2>Управление</h2>
+        <div class="status-display">
+            <h3>Приготовить кофе:</h3>
+            <button class="coffee-btn" id="brew-weak" onclick="sendCommand('brew weak')">Слабый (10 зёрен)</button>
+            <button class="coffee-btn" id="brew-medium" onclick="sendCommand('brew medium')">Средний (20 зёрен)</button>
+            <button class="coffee-btn" id="brew-strong" onclick="sendCommand('brew strong')">Крепкий (30 зёрен)</button>
+
+            <h3>Пополнить ресурсы:</h3>
+            <button class="refill-btn" id="refill-water" onclick="sendCommand('refill_water')">Долить воду</button>
+            <button class="refill-btn" id="refill-beans" onclick="sendCommand('refill_beans')">Добавить зёрна</button>
+        </div>
+    </div>
+
+    <div class="panel">
+        <h2>Логи системы</h2>
+        <div class="status-display" id="log-panel">
+            <div class="log-entry">Инициализация системы...</div>
+        </div>
+    </div>
+
+    <script>
+        // Обновление состояния интерфейса
+        function updateStatus() {
+            fetch('/status')
+                .then(response => response.json())
+                .then(data => {
+                    // Обновление статуса подключения
+                    const statusIcon = document.getElementById('status-icon');
+                    statusIcon.className = 'status-indicator ';
+
+                    if (!data.connected) {
+                        statusIcon.classList.add('status-disconnected');
+                        document.getElementById('machine-status').textContent = "Arduino не подключен";
+                        disableAllButtons(true);
+                        return;
+                    }
+
+                    // Обновление основных показателей
+                    const statusElement = document.getElementById('machine-status');
+                    statusElement.textContent = data.status;
+
+                    // Обновление значений ресурсов
+                    const waterElement = document.getElementById('water-level');
+                    const beansElement = document.getElementById('beans-level');
+
+                    if (data.initialized) {
+                        waterElement.textContent = data.water;
+                        waterElement.className = data.water === 0 ? 'critical' : '';
+                        beansElement.textContent = data.beans;
+                        beansElement.className = data.beans === 0 ? 'critical' : '';
+
+                        // Обновление цвета статуса
+                        if (data.status.includes('Пополните') || data.status.includes('ошибка')) {
+                            statusIcon.classList.add('status-error');
+                        } else if (data.status.includes('Варим')) {
+                            statusIcon.classList.add('status-brewing');
+                            statusElement.classList.add('brew-animation');
+                        } else {
+                            statusIcon.classList.add('status-ready');
+                            statusElement.classList.remove('brew-animation');
+                        }
+
+                        // Блокировка кнопок при варке
+                        const brewing = data.is_brewing || false;
+                        disableAllButtons(brewing);
+
+                        // Блокировка кнопок варки при недостатке ресурсов
+                        document.getElementById('brew-weak').disabled =
+                            brewing || data.water === 0 || data.beans < 10;
+                        document.getElementById('brew-medium').disabled =
+                            brewing || data.water === 0 || data.beans < 20;
+                        document.getElementById('brew-strong').disabled =
+                            brewing || data.water === 0 || data.beans < 30;
+
+                        // Кнопки пополнения всегда доступны, кроме времени варки
+                        document.getElementById('refill-water').disabled = brewing;
+                        document.getElementById('refill-beans').disabled = brewing;
+                    } else {
+                        waterElement.textContent = "---";
+                        waterElement.className = 'loading';
+                        beansElement.textContent = "---";
+                        beansElement.className = 'loading';
+                        statusIcon.classList.add('status-disconnected');
+                        disableAllButtons(true);
+                    }
+
+                    // Обновление времени
+                    document.getElementById('last-update').textContent =
+                        `Обновлено: ${data.last_update || 'ещё не обновлялось'}`;
+
+                    // Логи
+                    const logPanel = document.getElementById('log-panel');
+                    logPanel.innerHTML = '';
+                    data.logs.forEach(log => {
+                        const logEntry = document.createElement('div');
+                        logEntry.className = 'log-entry';
+                        logEntry.textContent = log;
+                        logPanel.appendChild(logEntry);
+                    });
+                    logPanel.scrollTop = logPanel.scrollHeight;
+                })
+                .catch(error => {
+                    console.error('Ошибка обновления статуса:', error);
+                    document.getElementById('machine-status').textContent = "Ошибка соединения";
+                    disableAllButtons(true);
+                });
+        }
+
+        // Отправка команд на сервер
+        function sendCommand(command) {
+            disableAllButtons(true);
+
+            fetch('/command', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                },
+                body: `command=${encodeURIComponent(command)}`
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (!data.success) {
+                    alert(data.message || 'Ошибка отправки команды');
+                }
+                updateStatus();
+            })
+            .catch(error => {
+                alert('Ошибка сети при отправке команды');
+                updateStatus();
+            });
+        }
+
+        // Управление состоянием кнопок
+        function disableAllButtons(disabled) {
+            const buttons = document.querySelectorAll('button');
+            buttons.forEach(button => {
+                button.disabled = disabled;
+            });
+        }
+
+        // Запускаем обновление статуса
+        let updateInterval = setInterval(() => {
+            updateStatus();
+            // После инициализации переходим на обычный интервал
+            if (document.getElementById('water-level').textContent !== "---") {
+                clearInterval(updateInterval);
+                setInterval(updateStatus, 1000);
+            }
+        }, 300);
+
+        // Первый запрос сразу
+        updateStatus();
+    </script>
+</body>
+</html>
